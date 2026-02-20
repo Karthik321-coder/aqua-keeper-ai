@@ -13,16 +13,22 @@ Run with: `pytest tests/unit/ -v`
 | `test_calibration.py` | Homography computation, pixel↔goal mapping |
 | `test_controller.py` | Trajectory fitting, intercept calculation, PID output |
 | `test_actuator.py` | Position clamping, velocity limiting, e-stop logic |
+| `test_tracker.py` | Kalman filter initialisation, tracking, coasting, reset |
+| `test_coverage.py` | Zone grid construction, idle position, coverage report |
+| `test_benchmark.py` | Latency profiler timing, window management, summary |
 
 ### 2. Integration Tests (`tests/integration/`)
 
 Run with: `pytest tests/integration/ -v --timeout=30`
 
-| Scenario | Expected behaviour |
-|----------|-------------------|
-| Vision → Controller pipe | Mock detections produce valid intercept commands |
-| Controller → Actuator pipe | Commands within limits are forwarded; out-of-range clipped |
-| Full loop with synthetic frames | No exceptions over 100 iterations |
+| Test class | Scenario | Expected behaviour |
+|---|---|---|
+| `TestVisionToController` | Mock detections → controller | Valid intercept commands within goal bounds |
+| `TestVisionToController` | Noisy detections → controller | Commands remain bounded despite noise |
+| `TestControllerToActuator` | Controller → actuator | Commands within limits are forwarded; out-of-range clipped |
+| `TestFullSyntheticLoop` | 100-frame synthetic trajectory | No exceptions over 100 iterations |
+| `TestFullSyntheticLoop` | Kalman tracker → mapper → controller → actuator | Full pipeline produces valid positions |
+| `TestFullSyntheticLoop` | Coverage strategy idle fallback | Valid idle position within goal width |
 
 ### 3. System Tests (physical)
 

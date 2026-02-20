@@ -8,14 +8,17 @@ An automated, computer-vision-powered water-pool goalkeeper that detects incomin
 
 1. [Overview](#overview)
 2. [Features](#features)
-3. [Hardware Bill of Materials](#hardware-bill-of-materials)
-4. [Wiring Overview](#wiring-overview)
-5. [Assembly Steps](#assembly-steps)
-6. [Calibration](#calibration)
-7. [Software Setup](#software-setup)
-8. [Running the System](#running-the-system)
-9. [Safety Considerations](#safety-considerations)
-10. [Project Structure](#project-structure)
+3. [Quick Start](#quick-start)
+4. [Hardware Bill of Materials](#hardware-bill-of-materials)
+5. [Wiring Overview](#wiring-overview)
+6. [Assembly Steps](#assembly-steps)
+7. [Calibration](#calibration)
+8. [Software Setup](#software-setup)
+9. [Running the System](#running-the-system)
+10. [Advanced Usage](#advanced-usage)
+11. [Safety Considerations](#safety-considerations)
+12. [Documentation Index](#documentation-index)
+13. [Project Structure](#project-structure)
 
 ---
 
@@ -23,16 +26,60 @@ An automated, computer-vision-powered water-pool goalkeeper that detects incomin
 
 Aqua Keeper AI combines a wide-angle underwater-safe camera with a lightweight deep-learning detector and a fast-response motorised blocker mounted across the goal mouth. A Raspberry Pi 4 (or Jetson Nano) reads frames from the camera, runs inference to locate the ball, predicts where it will cross the goal line, and commands the actuator to move there — all within a target latency budget of **< 80 ms** end-to-end.
 
+### How It Works
+
+```
+Camera → YOLOv8n Detection → Kalman Tracking → Trajectory Prediction
+    → PID Control → Motor Driver → Blocker intercepts ball
+```
+
+1. **Detect** — A YOLOv8n model detects the ball in each camera frame at 30 fps.
+2. **Track** — A Kalman filter smooths noisy detections and estimates velocity.
+3. **Predict** — A trajectory predictor extrapolates where the ball will cross the goal plane.
+4. **Control** — A PID controller computes the blocker's target position.
+5. **Actuate** — A high-speed servo or stepper drives the blocker to intercept the ball.
+
 ---
 
 ## Features
 
 - **High-speed motorised blocker** – belt-driven or linear servo covering the full goal width in < 200 ms.
-- **Full-goal coverage** – blocker paddle spans the goal height; horizontal position is the controlled axis.
+- **Full-goal coverage** – multi-zone coverage strategy optimises idle position for minimal worst-case reach time.
 - **CV-based ball detection** – YOLOv8n (or RT-DETR-L) running at 30 fps on Raspberry Pi 4 with NCNN/TFLite export or on Jetson Nano with TensorRT.
+- **Kalman filter tracking** – 6-state constant-acceleration filter for robust position and velocity estimation through occlusions.
 - **Predictive interception** – parabolic / linear trajectory extrapolation gives the blocker time to reach the intercept point before the ball arrives.
 - **PID motion control** – smooth, jerk-limited position commands with hardware safety limits.
+- **Latency profiling** – built-in per-stage benchmarking (capture, inference, control, actuation).
+- **Hardware diagnostics** – pre-flight health check for camera, GPIO, model weights, and system resources.
 - **Modular configuration** – single YAML file controls all tunable parameters.
+- **Comprehensive test suite** – 89+ unit and integration tests; no hardware required.
+
+---
+
+## Quick Start
+
+```bash
+# 1. Clone and set up
+git clone https://github.com/your-org/aqua-keeper-ai.git
+cd aqua-keeper-ai
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# 2. Run diagnostics
+python scripts/diagnostics.py
+
+# 3. Run unit tests (no hardware needed)
+python -m pytest tests/ -v
+
+# 4. Run a simulation (no camera or model needed)
+python scripts/test_loop.py --scenario straight
+python scripts/test_loop.py --scenario accuracy
+
+# 5. (With hardware) Calibrate and run
+python src/vision/calibration.py --mode intrinsic --board 9x6 --square 0.025 --output configs/camera_intrinsics.yaml
+python src/vision/calibration.py --mode extrinsic --intrinsics configs/camera_intrinsics.yaml --output configs/goal_homography.yaml
+python src/pipeline/main.py --config configs/default.yaml
+```
 
 ---
 
@@ -175,6 +222,65 @@ pytest tests/ -v
 
 ---
 
+## Advanced Usage
+
+### Kalman Tracker
+
+The Kalman ball tracker (`src/vision/tracker.py`) provides 6-state estimation (position, velocity, acceleration) for robust tracking through brief occlusions:
+
+```python
+from src.vision.tracker import KalmanBallTracker
+
+tracker = KalmanBallTracker(process_noise=1.0, measurement_noise=10.0, max_coast_frames=10)
+tracker.update(cx=320.0, cy=240.0, t=0.0)
+print(tracker.position)     # (x, y)
+print(tracker.velocity)     # (vx, vy)
+print(tracker.is_tracking)  # True
+```
+
+### Coverage Strategy
+
+The multi-zone coverage strategy (`src/control/coverage.py`) divides the goal into zones and computes the optimal idle position:
+
+```python
+from src.control.coverage import CoverageStrategy
+
+cov = CoverageStrategy(goal_width=2.4, goal_height=0.9, zone_cols=5, zone_rows=3)
+print(f"Idle position: {cov.idle_position:.2f} m")
+print(f"Worst-case reach: {cov.worst_case_reach_time(cov.idle_position):.3f} s")
+
+# Per-zone reachability report
+for entry in cov.coverage_report(cov.idle_position):
+    print(f"  {entry['zone']}: {entry['reach_time_s']:.3f} s {'✅' if entry['reachable_200ms'] else '⚠️'}")
+```
+
+### Latency Profiling
+
+The benchmark profiler (`src/utils/benchmark.py`) tracks per-stage latencies:
+
+```python
+from src.utils.benchmark import LatencyProfiler
+
+prof = LatencyProfiler()
+with prof.measure("inference"):
+    # ... run inference ...
+    pass
+prof.tick()
+print(prof.summary())
+```
+
+### System Diagnostics
+
+Run a comprehensive pre-flight check before deployment:
+
+```bash
+python scripts/diagnostics.py --config configs/default.yaml
+```
+
+This checks Python version, dependencies, camera access, model weights, disk space, and GPIO availability.
+
+---
+
 ## Safety Considerations
 
 1. **Emergency stop** – Connect a hardware e-stop button to GPIO pin 26. The software monitors this pin; `actuator.py` will disable motor output immediately.
@@ -184,6 +290,21 @@ pytest tests/ -v
 5. **Electrical safety** – Use a fused supply. Ground the metal extrusion frame.
 6. **Children** – The blocker moves rapidly. Install a mesh guard in front of the mechanism.
 7. **Failsafe mode** – If vision or control threads crash, the actuator holds its last safe position (centre) rather than driving to a limit.
+
+---
+
+## Documentation Index
+
+| Document | Description |
+|---|---|
+| [README.md](README.md) | Project overview, quick start, and usage |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System design, data flow, state machine, deployment diagrams |
+| [VISION.md](VISION.md) | Model selection, dataset, training, augmentation, deployment |
+| [CONTROL.md](CONTROL.md) | Trajectory prediction, PID tuning, servo/stepper sizing |
+| [HARDWARE.md](HARDWARE.md) | Full BOM, 3D print specs, wiring, step-by-step assembly |
+| [OPERATIONS.md](OPERATIONS.md) | Deployment, monitoring, maintenance, troubleshooting |
+| [TESTING.md](TESTING.md) | Unit, integration, system, and latency test procedures |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, coding standards, PR process |
 
 ---
 
@@ -198,27 +319,34 @@ aqua-keeper-ai/
 │   └── control-loop.png       # (placeholder — see ARCHITECTURE.md mermaid)
 ├── models/                    # Place model weights here (gitignored)
 ├── scripts/
+│   ├── diagnostics.py         # Hardware and software diagnostics
 │   ├── train.py               # Training stub
 │   └── test_loop.py           # Simulation test loop
 ├── src/
 │   ├── control/
 │   │   ├── actuator.py        # Motor interface + safety interlocks
-│   │   └── controller.py      # Trajectory prediction + PID
+│   │   ├── controller.py      # Trajectory prediction + PID
+│   │   └── coverage.py        # Multi-zone coverage strategy
 │   ├── pipeline/
 │   │   └── main.py            # End-to-end loop
 │   ├── utils/
+│   │   ├── benchmark.py       # Latency profiler
 │   │   ├── config.py          # Config loader
 │   │   └── logger.py          # Structured logger
 │   └── vision/
 │       ├── calibration.py     # Camera & field calibration
-│       └── detector.py        # Ball detection + tracking
+│       ├── detector.py        # Ball detection + tracking
+│       └── tracker.py         # Kalman filter ball tracker
 ├── tests/
-│   └── unit/                  # pytest unit tests
-├── ARCHITECTURE.md
-├── CONTROL.md
-├── OPERATIONS.md
-├── TESTING.md
-├── VISION.md
+│   ├── unit/                  # Unit tests (89 tests)
+│   └── integration/           # Integration tests
+├── ARCHITECTURE.md            # System design and diagrams
+├── CONTRIBUTING.md            # Development and contribution guide
+├── CONTROL.md                 # Control system details
+├── HARDWARE.md                # BOM, assembly, wiring guide
+├── OPERATIONS.md              # Deployment and monitoring
+├── TESTING.md                 # Testing strategy
+├── VISION.md                  # Vision pipeline and training
 ├── pytest.ini
 └── requirements.txt
 ```
