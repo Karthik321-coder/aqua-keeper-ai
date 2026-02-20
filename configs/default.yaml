@@ -1,0 +1,43 @@
+# Aqua Keeper AI — default configuration
+# All values here are the system defaults; override per-deployment.
+
+camera:
+  source: 0                          # int device index or "/dev/video0" or video file path
+  width: 1280
+  height: 720
+  homography_path: configs/goal_homography.yaml
+
+model:
+  weights_path: models/yolov8n_ball.pt
+  backend: pytorch                   # pytorch | ncnn | tensorrt
+  confidence_threshold: 0.40
+  smoothing_alpha: 0.40              # EMA alpha for bbox smoothing
+  history_len: 10
+  imgsz: 640
+  device: cpu                        # cpu | cuda:0 | mps
+
+geometry:
+  goal_width: 2.4                    # metres
+  goal_height: 0.9                   # metres
+  default_ball_depth: 1.0            # fallback z depth (metres) when no stereo
+
+control:
+  kp: 5.0
+  ki: 0.1
+  kd: 0.05
+  min_observations: 3                # min detections before trajectory prediction
+
+motor:
+  backend: mock                      # mock | servo | stepper
+  min_pos: 0.0                       # metres — left hard limit
+  max_pos: 2.4                       # metres — right hard limit
+  max_velocity: 4.0                  # m/s
+  max_acceleration: 20.0             # m/s²
+  estop_pin: 26                      # BCM GPIO pin; set to null to disable
+  zero_offset_steps: 0               # steps added to home position for calibration
+  steps_per_metre: 3200.0            # for stepper backend (steps per metre of travel)
+  servo_channel: 0                   # PCA9685 channel (servo backend)
+
+logging:
+  log_dir: logs
+  level: INFO
